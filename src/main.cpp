@@ -20,16 +20,28 @@ void handleNetworkConnect();
 void handleRoot();
 
 Preferences preferences;
-
 WebServer server(80);
 
 const String auraEndpoint = "https://api.nikjavor.si/v1/aura";
 const unsigned long auraFetchInterval = 15UL * 60UL * 1000UL; // after successful fetch
 const unsigned long auraRetryInterval = 30UL * 1000UL;        // after failed fetch
-
+unsigned long auraInterval = 0;                               // either auraFetchInterval or auraRetryInterval
 unsigned long lastAuraFetch = 0;
-unsigned long auraInterval = 0;
 
+const unsigned long wifiCheckInterval = 30UL * 1000UL;
+unsigned long lastWifiCheck = 0;
+
+const unsigned long statusBlinkInterval = 500UL;
+unsigned long lastStatusBlink = 0;
+bool statusLedOn = false;
+
+bool btnDown = false;
+bool longPressHandeled = false;
+unsigned long btnDownStart = 0;
+const unsigned long longPressInterval = 2UL * 1000UL;
+
+int btnPin = 18;
+int statusPin = 19;
 int rPin = 25;
 int gPin = 26;
 int bPin = 27;
@@ -43,11 +55,22 @@ void setup()
   // put your setup code here, to run once:
   Serial.begin(115200);
 
-  WiFi.mode(WIFI_STA);
-
+  pinMode(btnPin, INPUT_PULLUP);
+  pinMode(statusPin, OUTPUT);
   pinMode(rPin, OUTPUT);
   pinMode(gPin, OUTPUT);
   pinMode(bPin, OUTPUT);
+
+  WiFi.mode(WIFI_STA);
+
+  // Check for saved WiFi credentials and try to connect.
+  preferences.begin("credentials", true); // opens storage in readonly mode
+  String ssid = preferences.getString("ssid", "");
+  String pass = preferences.getString("pass", "");
+  preferences.end();
+
+  if (!ssid.isEmpty())
+    tryInitWiFi(ssid, pass);
 
   Serial.println("\nESP32 is ready!");
   delay(100);
@@ -56,28 +79,52 @@ void setup()
 void loop()
 {
   // put your main code here, to run repeatedly:
-  analogWrite(rPin, r);
-  analogWrite(gPin, g);
-  analogWrite(bPin, b);
+  unsigned long currentMillis = millis();
+
+  if (digitalRead(btnPin) == LOW)
+  {
+    if (!btnDown) // if it wasnt pressed previous loop
+    {
+      btnDownStart = currentMillis;
+      btnDown = true;
+    }
+
+    if (!longPressHandeled && (currentMillis - btnDownStart > longPressInterval))
+    {
+      longPressHandeled = true;
+      WiFi.disconnect();
+      setWiFiCredentials();
+    }
+  }
+  else
+  {
+    btnDown = false;
+    longPressHandeled = false;
+  }
+
+  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - lastWifiCheck > wifiCheckInterval))
+  {
+    lastWifiCheck = currentMillis;
+
+    digitalWrite(statusPin, HIGH);
+    statusLedOn = true;
+
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+  }
 
   if (WiFi.status() == WL_CONNECTED)
   {
+    digitalWrite(statusPin, LOW);
+    statusLedOn = false;
+
     setAura();
+    analogWrite(rPin, r);
+    analogWrite(gPin, g);
+    analogWrite(bPin, b);
     return;
   }
-
-  preferences.begin("credentials", true); // opens storage in readonly mode
-  String ssid = preferences.getString("ssid", "");
-  String pass = preferences.getString("pass", "");
-  preferences.end();
-
-  if (!ssid.isEmpty() && tryInitWiFi(ssid, pass))
-  {
-    setAura();
-    return;
-  }
-
-  setWiFiCredentials();
 }
 
 // put function definitions here:
@@ -88,7 +135,7 @@ bool tryInitWiFi(const String &ssid, const String &password, wifi_mode_t mode)
   Serial.print("\nConnecting to WiFi ..");
 
   int retries = 0;
-  while (retries < 60) // x sekund se probava povezat
+  while (retries < 30) // x sekund se probava povezat
   {
     wl_status_t status = WiFi.status();
 
@@ -147,6 +194,15 @@ void setWiFiCredentials()
 
   while (WiFi.status() != WL_CONNECTED)
   {
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastStatusBlink > statusBlinkInterval)
+    {
+      lastStatusBlink = currentMillis;
+
+      statusLedOn = !statusLedOn;
+      digitalWrite(statusPin, statusLedOn ? HIGH : LOW);
+    }
+
     server.handleClient();
     delay(2);
   }
