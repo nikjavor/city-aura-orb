@@ -54,12 +54,17 @@ void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  Serial.println("ESP32 setup start.");
 
   pinMode(btnPin, INPUT_PULLUP);
   pinMode(statusPin, OUTPUT);
   pinMode(rPin, OUTPUT);
   pinMode(gPin, OUTPUT);
   pinMode(bPin, OUTPUT);
+
+  analogWrite(rPin, 0);
+  analogWrite(gPin, 0);
+  analogWrite(bPin, 0);
 
   WiFi.mode(WIFI_STA);
 
@@ -79,6 +84,10 @@ void setup()
 void loop()
 {
   // put your main code here, to run repeatedly:
+  analogWrite(rPin, r);
+  analogWrite(gPin, g);
+  analogWrite(bPin, b);
+
   unsigned long currentMillis = millis();
 
   if (digitalRead(btnPin) == LOW)
@@ -102,7 +111,7 @@ void loop()
     longPressHandeled = false;
   }
 
-  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - lastWifiCheck > wifiCheckInterval))
+  if ((WiFi.status() != WL_CONNECTED) && (lastWifiCheck == 0 || currentMillis - lastWifiCheck > wifiCheckInterval))
   {
     lastWifiCheck = currentMillis;
 
@@ -231,6 +240,10 @@ void handleNetworkScan()
     Serial.println(" networks");
     for (int i = 0; i < n; i++)
     {
+      Serial.print(WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "*" : "");
+      Serial.print(WiFi.SSID());
+      Serial.print(" - ");
+      Serial.println(WiFi.RSSI());
       JsonObject entry = networks.add<JsonObject>();
       entry["ssid"] = WiFi.SSID(i);
       entry["protected"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
